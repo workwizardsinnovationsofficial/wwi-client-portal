@@ -3,7 +3,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
   limit,
   onSnapshot,
   addDoc,
@@ -16,7 +15,17 @@ import { Badge } from '../../components/common/Badge'
 import { formatDateKolkata, getInitials } from '../../lib/utils'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
-import { MessageSquare, Send, Bell, BellRing, CheckCircle2 } from 'lucide-react'
+import {
+  MessageSquare,
+  Send,
+  Bell,
+  BellRing,
+  CheckCircle2,
+  CornerUpLeft,
+  X,
+  Shield,
+  User,
+} from 'lucide-react'
 import {
   isNotificationSupported,
   getNotificationPermission,
@@ -32,13 +41,50 @@ export function ClientMessagesView() {
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
+  const [replyingTo, setReplyingTo] = useState(null)
   const [sending, setSending] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState(getNotificationPermission())
   const [promptDismissed, setPromptDismissed] = useState(false)
 
   const messagesEndRef = useRef(null)
+  const inputRef = useRef(null)
   const isFirstSnapshot = useRef(true)
   const prevCount = useRef(0)
+
+  // Robust helper to check if a message was sent by the currently logged-in user
+  const checkIsMe = (m) => {
+    if (!m) return false
+    const myUid = user?.uid
+    const myProfileId = userProfile?.id
+    const myEmail = (user?.email || userProfile?.email || '').toLowerCase().trim()
+    const msgSenderEmail = (m.senderEmail || '').toLowerCase().trim()
+    const msgSenderId = String(m.senderId || '').trim()
+
+    return Boolean(
+      (myUid && msgSenderId === String(myUid).trim()) ||
+      (myProfileId && msgSenderId === String(myProfileId).trim()) ||
+      (myEmail && msgSenderEmail && myEmail === msgSenderEmail)
+    )
+  }
+
+  // Robust helper to determine if a message is from WWI staff vs Client
+  const checkIsStaff = (m) => {
+    if (!m) return false
+    const email = (m.senderEmail || '').toLowerCase().trim()
+    const role = (m.senderRole || '').toLowerCase().trim()
+    const name = (m.senderName || '').toLowerCase().trim()
+
+    return Boolean(
+      m.isStaff === true ||
+      role === 'super_admin' ||
+      role === 'admin' ||
+      role === 'team_member' ||
+      email.includes('@wwi.org.in') ||
+      email.includes('wwi-admin') ||
+      name.includes('wwi') ||
+      name.includes('admin')
+    )
+  }
 
   // 1. Fetch Projects belonging to this client org
   useEffect(() => {
@@ -71,7 +117,7 @@ export function ClientMessagesView() {
     const q = query(
       collection(db, 'messages'),
       where('projectId', '==', selectedProjectId),
-      limit(50)
+      limit(100)
     )
 
     const unsub = onSnapshot(
@@ -85,8 +131,9 @@ export function ClientMessagesView() {
         if (!isFirstSnapshot.current && list.length > prevCount.current) {
           const incoming = list.slice(prevCount.current)
           incoming.forEach((m) => {
-            if (m.senderId !== user?.uid) {
-              sendWebNotification(`WWI Team: ${m.senderName || 'New Message'}`, {
+            if (!checkIsMe(m)) {
+              const senderLabel = checkIsStaff(m) ? 'WWI Technical Team' : (m.senderName || 'Project Message')
+              sendWebNotification(`${senderLabel}`, {
                 body: m.text,
                 tag: `msg-${m.id}`,
               })
@@ -108,7 +155,7 @@ export function ClientMessagesView() {
     )
 
     return () => unsub()
-  }, [selectedProjectId, user?.uid])
+  }, [selectedProjectId, user?.uid, user?.email])
 
   const handleRequestPermission = async () => {
     const perm = await requestNotificationPermission()
@@ -123,7 +170,6 @@ export function ClientMessagesView() {
     }
   }
 
-
   const handleSendMessage = async (e) => {
     e.preventDefault()
     if (!newMessage.trim() || !selectedProjectId) return
@@ -132,20 +178,38 @@ export function ClientMessagesView() {
     setSending(true)
 
     try {
+      const myName =
+        userProfile?.name ||
+        userProfile?.displayName ||
+        organization?.name ||
+        user?.email?.split('@')[0] ||
+        'Client'
+      const myEmail = userProfile?.email || user?.email || ''
+      const myId = userProfile?.id || user?.uid || 'client-user'
+
       await addDoc(collection(db, 'messages'), {
         projectId: selectedProjectId,
         projectName: selectedPrj?.name || 'Project',
-        organizationId,
-        senderId: user.uid,
-        senderName: userProfile?.name || userProfile?.displayName || user.email.split('@')[0],
-        senderEmail: user.email,
+        organizationId: organizationId || selectedPrj?.organizationId || null,
+        senderId: myId,
+        senderName: myName,
+        senderEmail: myEmail,
         senderRole: 'client',
         isStaff: false,
         text: newMessage.trim(),
+        replyTo: replyingTo
+          ? {
+              id: replyingTo.id,
+              senderName: replyingTo.senderName || (checkIsStaff(replyingTo) ? 'WWI Team' : 'Client'),
+              text: replyingTo.text || '',
+              isStaff: checkIsStaff(replyingTo),
+            }
+          : null,
         createdAt: new Date().toISOString(),
       })
 
       setNewMessage('')
+      setReplyingTo(null)
     } catch (err) {
       showError(err.message || 'Failed to send message')
     } finally {
@@ -177,7 +241,10 @@ export function ClientMessagesView() {
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setSelectedProjectId(p.id)}
+                  onClick={() => {
+                    setSelectedProjectId(p.id)
+                    setReplyingTo(null)
+                  }}
                   className={`w-full text-left p-3.5 transition-colors ${
                     isSelected ? 'bg-wwi-selected text-wwi-text font-medium' : 'hover:bg-neutral-50 text-neutral-600'
                   }`}
@@ -228,6 +295,7 @@ export function ClientMessagesView() {
             </div>
           )}
 
+          {/* Chat Header */}
           <div className="p-3.5 border-b border-wwi-border flex items-center justify-between">
             <div>
               <div className="text-xs font-semibold text-wwi-text">
@@ -261,57 +329,145 @@ export function ClientMessagesView() {
             </div>
           </div>
 
-
+          {/* Messages list */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map((m) => {
-              const isMe = m.senderId === user?.uid
+              const isMe = checkIsMe(m)
+              const isStaffMsg = checkIsStaff(m)
+
               return (
                 <div
                   key={m.id}
-                  className={`flex items-start gap-2.5 ${isMe ? 'flex-row-reverse' : ''}`}
+                  className={`flex items-start gap-2.5 group ${isMe ? 'flex-row-reverse' : ''}`}
                 >
+                  {/* Sender Avatar */}
                   <div
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                      m.isStaff ? 'bg-wwi-dark text-white' : 'bg-neutral-200 text-neutral-800'
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 shadow-sm ${
+                      isStaffMsg
+                        ? 'bg-neutral-900 text-white border border-neutral-700'
+                        : 'bg-blue-600 text-white'
                     }`}
+                    title={isStaffMsg ? 'Work Wizards Innovations Team' : 'Client Organization'}
                   >
-                    {getInitials(m.senderName)}
+                    {isStaffMsg ? 'WWI' : getInitials(m.senderName || 'C')}
                   </div>
-                  <div
-                    className={`max-w-md rounded-lg p-3 text-xs ${
-                      isMe
-                        ? 'bg-wwi-dark text-white'
-                        : 'bg-wwi-surface text-wwi-text border border-wwi-border'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3 mb-1 text-[10px] opacity-75">
-                      <span className="font-semibold">
-                        {m.senderName} {m.isStaff ? '(WWI Team)' : ''}
-                      </span>
-                      <span>{formatDateKolkata(m.createdAt, 'hh:mm a')}</span>
+
+                  {/* Message Bubble Container */}
+                  <div className={`max-w-md flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                    <div
+                      className={`rounded-xl p-3 text-xs shadow-sm relative ${
+                        isMe
+                          ? 'bg-neutral-900 text-white rounded-tr-none'
+                          : 'bg-neutral-50 text-neutral-900 border border-neutral-200 rounded-tl-none'
+                      }`}
+                    >
+                      {/* Sender Header */}
+                      <div className="flex items-center justify-between gap-3 mb-1.5 text-[10px] pb-1 border-b border-black/10 dark:border-white/10">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold">
+                            {m.senderName || (isStaffMsg ? 'WWI Team' : 'Client')}
+                          </span>
+                          {isStaffMsg ? (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-neutral-800 text-amber-300 border border-neutral-700">
+                              WWI Admin
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-medium bg-blue-100 text-blue-800">
+                              Client
+                            </span>
+                          )}
+                        </div>
+                        <span className="opacity-70 font-mono text-[9px]">
+                          {formatDateKolkata(m.createdAt, 'hh:mm a')}
+                        </span>
+                      </div>
+
+                      {/* Quoted Reply Block */}
+                      {m.replyTo && (
+                        <div
+                          className={`mb-2 p-2 rounded text-[11px] border-l-2 ${
+                            isMe
+                              ? 'bg-white/10 border-amber-400 text-neutral-200'
+                              : 'bg-neutral-200/70 border-neutral-800 text-neutral-800'
+                          }`}
+                        >
+                          <div className="font-semibold flex items-center gap-1 text-[10px] opacity-90">
+                            <CornerUpLeft className="w-2.5 h-2.5" />
+                            <span>Replying to {m.replyTo.senderName}:</span>
+                          </div>
+                          <p className="line-clamp-2 italic text-[10px] opacity-80 mt-0.5">
+                            "{m.replyTo.text}"
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Main Message Text */}
+                      <div className="leading-relaxed whitespace-pre-wrap">{m.text}</div>
                     </div>
-                    <div className="leading-relaxed whitespace-pre-wrap">{m.text}</div>
+
+                    {/* Quick Action: Reply Button */}
+                    <div className="mt-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplyingTo(m)
+                          inputRef.current?.focus()
+                        }}
+                        className="text-[10px] text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200 font-medium flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-neutral-100 transition"
+                      >
+                        <CornerUpLeft className="w-3 h-3" />
+                        Reply
+                      </button>
+                    </div>
                   </div>
                 </div>
               )
             })}
+
             {messages.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-wwi-muted text-xs">
                 <MessageSquare className="w-8 h-8 text-neutral-300 mb-2" />
                 <p>No messages yet in this project channel.</p>
-                <p className="text-[11px] text-neutral-400 mt-0.5">Send a message to reach your WWI technical lead.</p>
+                <p className="text-[11px] text-neutral-400 mt-0.5">
+                  Send a message to reach your WWI technical lead.
+                </p>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Active Reply Banner */}
+          {replyingTo && (
+            <div className="px-4 py-2 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between text-xs animate-in slide-in-from-bottom-2">
+              <div className="flex items-center gap-2 truncate">
+                <CornerUpLeft className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
+                <span className="text-neutral-500">
+                  Replying to <strong className="text-neutral-900">{replyingTo.senderName}</strong>:
+                </span>
+                <span className="text-neutral-600 italic truncate max-w-sm sm:max-w-md">
+                  "{replyingTo.text}"
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                className="text-neutral-400 hover:text-neutral-800 p-1 text-xs"
+                title="Cancel reply"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Message Input Form */}
           <form
             onSubmit={handleSendMessage}
             className="p-3 border-t border-wwi-border bg-white flex items-center gap-2"
           >
             <input
+              ref={inputRef}
               type="text"
-              placeholder="Type your message to the WWI team..."
+              placeholder={replyingTo ? `Reply to ${replyingTo.senderName}...` : "Type your message to the WWI team..."}
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               disabled={!selectedProjectId || sending}
@@ -333,3 +489,4 @@ export function ClientMessagesView() {
     </div>
   )
 }
+
