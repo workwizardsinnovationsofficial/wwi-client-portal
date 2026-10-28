@@ -1,0 +1,179 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isWWIStaff() {
+      return isAuthenticated() && 
+        (request.auth.token.role in ['super_admin', 'admin', 'team_member'] ||
+         getUserData().role in ['super_admin', 'admin', 'team_member']);
+    }
+
+    function isExecutiveAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.role in ['super_admin', 'admin'] ||
+         getUserData().role in ['super_admin', 'admin']);
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.role == 'super_admin' ||
+         getUserData().role == 'super_admin');
+    }
+
+    function getUserOrgId() {
+      return request.auth.token.organizationId != null 
+        ? request.auth.token.organizationId 
+        : getUserData().organizationId;
+    }
+
+    function isClientOfOrg(orgId) {
+      return isAuthenticated() && orgId != null && getUserOrgId() == orgId;
+    }
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isWWIStaff());
+      allow create: if isAuthenticated() && (
+        isExecutiveAdmin() || 
+        (request.auth.uid == userId && !('role' in request.resource.data) || request.resource.data.role == 'client')
+      );
+      allow update: if isAuthenticated() && (
+        isExecutiveAdmin() ||
+        (request.auth.uid == userId && 
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'organizationId', 'isSuspended']))
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    // Organizations Collection
+    match /organizations/{orgId} {
+      allow read: if isWWIStaff() || isClientOfOrg(orgId);
+      allow create, update: if isExecutiveAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Projects Collection
+    match /projects/{projectId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow create, update: if isWWIStaff();
+      allow delete: if isExecutiveAdmin();
+    }
+
+    // Contracts Collection
+    match /contracts/{contractId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow write: if isExecutiveAdmin();
+    }
+
+    // Milestones Collection
+    match /milestones/{milestoneId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow create, update: if isWWIStaff();
+      allow delete: if isExecutiveAdmin();
+    }
+
+    // Invoices Collection
+    match /invoices/{invoiceId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      // Invoices can only be created, modified or recorded by WWI staff
+      allow write: if isExecutiveAdmin();
+    }
+
+    // Meetings Collection
+    match /meetings/{meetingId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow create: if isAuthenticated() && (
+        isWWIStaff() || 
+        (isClientOfOrg(request.resource.data.organizationId) && request.resource.data.requestedBy == request.auth.uid)
+      );
+      allow update: if isAuthenticated() && (
+        isWWIStaff() ||
+        (isClientOfOrg(resource.data.organizationId) && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'rescheduleNote', 'updatedAt']))
+      );
+      allow delete: if isExecutiveAdmin();
+    }
+
+    // Deliverables Collection
+    match /deliverables/{deliverableId} {
+      allow read: if isWWIStaff() || 
+        (isClientOfOrg(resource.data.organizationId) && resource.data.visibility == 'client_visible');
+      allow write: if isWWIStaff();
+    }
+
+    // Conversations Collection
+    match /conversations/{conversationId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow write: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+    }
+
+    // Messages Collection
+    match /messages/{messageId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow create: if isAuthenticated() && (
+        isWWIStaff() || 
+        (isClientOfOrg(request.resource.data.organizationId) && request.resource.data.senderId == request.auth.uid)
+      );
+      allow update, delete: if isExecutiveAdmin();
+    }
+
+    // Support Tickets Collection
+    match /supportTickets/{ticketId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow create: if isAuthenticated() && (
+        isWWIStaff() || 
+        (isClientOfOrg(request.resource.data.organizationId) && request.resource.data.createdBy == request.auth.uid)
+      );
+      allow update: if isAuthenticated() && (
+        isWWIStaff() ||
+        (isClientOfOrg(resource.data.organizationId) && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'lastClientReplyAt']))
+      );
+      allow delete: if isExecutiveAdmin();
+    }
+
+    // Submissions Collection
+    match /submissions/{submissionId} {
+      allow read: if isWWIStaff() || isClientOfOrg(resource.data.organizationId);
+      allow create: if isAuthenticated() && (
+        isWWIStaff() || 
+        (isClientOfOrg(request.resource.data.organizationId) && request.resource.data.submittedBy == request.auth.uid)
+      );
+      allow update: if isAuthenticated() && (
+        isWWIStaff() ||
+        (isClientOfOrg(resource.data.organizationId) && resource.data.status == 'submitted')
+      );
+      allow delete: if isExecutiveAdmin();
+    }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+      allow create: if isAuthenticated();
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Activity Logs Collection (Append-only audit trail, only readable by executive admins)
+    match /activityLogs/{logId} {
+      allow read: if isExecutiveAdmin();
+      allow write: if isWWIStaff();
+    }
+  }
+}
