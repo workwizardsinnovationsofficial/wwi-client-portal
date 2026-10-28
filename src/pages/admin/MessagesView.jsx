@@ -24,6 +24,7 @@ import {
   BellRing,
   CornerUpLeft,
   X,
+  ArrowDown,
 } from 'lucide-react'
 import {
   isNotificationSupported,
@@ -42,13 +43,15 @@ export function MessagesView() {
   const [newMessage, setNewMessage] = useState('')
   const [replyingTo, setReplyingTo] = useState(null)
   const [sending, setSending] = useState(false)
+  const [showScrollBottom, setShowScrollBottom] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState(getNotificationPermission())
   const [promptDismissed, setPromptDismissed] = useState(false)
 
-  const messagesEndRef = useRef(null)
+  const chatContainerRef = useRef(null)
   const inputRef = useRef(null)
   const isFirstSnapshot = useRef(true)
   const prevCount = useRef(0)
+  const userScrolledUpRef = useRef(false)
 
   // Robust helper to check if a message was sent by the currently logged-in admin
   const checkIsMe = (m) => {
@@ -85,6 +88,29 @@ export function MessagesView() {
     )
   }
 
+  // Scroll listener to detect when user has scrolled up to view previous messages
+  const handleScroll = () => {
+    if (!chatContainerRef.current) return
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+
+    // If user is more than 100px from the bottom, they are viewing older messages
+    const isUp = distanceFromBottom > 100
+    setShowScrollBottom(isUp)
+    userScrolledUpRef.current = isUp
+  }
+
+  const scrollToBottom = (smooth = true) => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto',
+      })
+      userScrolledUpRef.current = false
+      setShowScrollBottom(false)
+    }
+  }
+
   // 1. Fetch Projects List
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'projects'), (snap) => {
@@ -107,11 +133,13 @@ export function MessagesView() {
 
     isFirstSnapshot.current = true
     prevCount.current = 0
+    userScrolledUpRef.current = false
+    setShowScrollBottom(false)
 
     const q = query(
       collection(db, 'messages'),
       where('projectId', '==', selectedProjectId),
-      limit(100)
+      limit(300)
     )
 
     const unsub = onSnapshot(
@@ -119,7 +147,7 @@ export function MessagesView() {
       (snap) => {
         const list = []
         snap.forEach((d) => list.push({ id: d.id, ...d.data() }))
-        list.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
+        list.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
 
         // Trigger web desktop notification if a new client message arrives
         if (!isFirstSnapshot.current && list.length > prevCount.current) {
@@ -135,13 +163,17 @@ export function MessagesView() {
           })
         }
 
+        const isInitial = isFirstSnapshot.current
         isFirstSnapshot.current = false
         prevCount.current = list.length
         setMessages(list)
 
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-        }, 100)
+        // Only auto-scroll to bottom on first load, or if user was already at the bottom
+        if (isInitial) {
+          setTimeout(() => scrollToBottom(false), 50)
+        } else if (!userScrolledUpRef.current) {
+          setTimeout(() => scrollToBottom(true), 50)
+        }
       },
       (err) => {
         console.warn('Messages listener notice:', err.message)
@@ -199,6 +231,8 @@ export function MessagesView() {
 
       setNewMessage('')
       setReplyingTo(null)
+      userScrolledUpRef.current = false
+      setTimeout(() => scrollToBottom(true), 50)
     } catch (err) {
       showError(err.message || 'Failed to deliver message')
     } finally {
@@ -215,15 +249,15 @@ export function MessagesView() {
         description="Encrypted, audit-logged communications with client teams on active project deliverables."
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[640px] bg-white border border-wwi-border rounded-lg overflow-hidden shadow-sm">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[640px] max-h-[640px] bg-white border border-wwi-border rounded-lg overflow-hidden shadow-sm">
         {/* Left Col: Projects Selector */}
-        <div className="lg:col-span-1 border-r border-wwi-border flex flex-col h-full bg-wwi-surface/30">
-          <div className="p-3.5 border-b border-wwi-border bg-white">
+        <div className="lg:col-span-1 border-r border-wwi-border flex flex-col h-full min-h-0 overflow-hidden bg-wwi-surface/30">
+          <div className="p-3.5 border-b border-wwi-border bg-white shrink-0">
             <span className="text-xs font-semibold text-wwi-text uppercase tracking-wider">
               Project Channels
             </span>
           </div>
-          <div className="flex-1 overflow-y-auto divide-y divide-wwi-border">
+          <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-wwi-border">
             {projects.map((p) => {
               const isSelected = p.id === selectedProjectId
               return (
@@ -258,10 +292,10 @@ export function MessagesView() {
         </div>
 
         {/* Right 3 Cols: Message Thread */}
-        <div className="lg:col-span-3 flex flex-col h-full bg-white">
+        <div className="lg:col-span-3 flex flex-col h-full min-h-0 overflow-hidden bg-white relative">
           {/* Permission Prompt Banner */}
           {notificationPermission === 'default' && !promptDismissed && isNotificationSupported() && (
-            <div className="px-4 py-2.5 bg-neutral-900 text-white flex items-center justify-between text-xs animate-in fade-in">
+            <div className="px-4 py-2.5 bg-neutral-900 text-white flex items-center justify-between text-xs shrink-0 animate-in fade-in">
               <div className="flex items-center gap-2">
                 <BellRing className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
                 <span>
@@ -288,7 +322,7 @@ export function MessagesView() {
           )}
 
           {/* Active project header */}
-          <div className="p-3.5 border-b border-wwi-border flex items-center justify-between">
+          <div className="p-3.5 border-b border-wwi-border flex items-center justify-between shrink-0 bg-white">
             <div>
               <div className="text-xs font-semibold text-wwi-text">
                 {activeProject ? activeProject.name : 'Select a project channel'}
@@ -326,8 +360,12 @@ export function MessagesView() {
             </div>
           </div>
 
-          {/* Messages list */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Messages list - Fully scrollable container with min-h-0 */}
+          <div
+            ref={chatContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto min-h-0 p-4 space-y-4 overscroll-contain"
+          >
             {messages.map((m) => {
               const isMe = checkIsMe(m)
               const isStaffMsg = checkIsStaff(m)
@@ -430,8 +468,19 @@ export function MessagesView() {
                 </p>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
+
+          {/* Floating "Scroll to latest" button when user scrolled up */}
+          {showScrollBottom && (
+            <button
+              type="button"
+              onClick={() => scrollToBottom(true)}
+              className="absolute bottom-16 right-6 px-3 py-1.5 rounded-full bg-neutral-900 text-white text-[11px] font-semibold shadow-xl border border-neutral-700 hover:bg-black transition-all flex items-center gap-1.5 z-20 animate-in fade-in slide-in-from-bottom-2 cursor-pointer"
+            >
+              <ArrowDown className="w-3.5 h-3.5" />
+              Scroll to latest
+            </button>
+          )}
 
           {/* Active Reply Banner */}
           {replyingTo && (
