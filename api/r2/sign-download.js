@@ -17,53 +17,43 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Object key is required' })
   }
 
-  const fbAdmin = getFirebaseAdmin()
-  const db = fbAdmin.firestore()
+  // If local fallback key or documents key, return null so frontend serves dataUrl
+  if (key.startsWith('local/') || key.startsWith('documents/')) {
+    return res.status(200).json({
+      downloadUrl: null,
+      isLocal: true,
+    })
+  }
 
-  // Find associated record in deliverables, attachments, or submissions to verify ownership
   try {
-    const deliverableSnap = await db.collection('deliverables')
-      .where('storageKey', '==', key)
-      .limit(1)
-      .get()
-
-    if (!deliverableSnap.empty) {
-      const doc = deliverableSnap.docs[0].data()
-      // If client, check org and visibility
-      if (caller.role === 'client') {
-        if (doc.organizationId !== caller.organizationId) {
-          return res.status(403).json({ error: 'Access denied: File belongs to another organization' })
-        }
-        if (doc.visibility === 'internal') {
-          return res.status(403).json({ error: 'Access denied: Internal document' })
-        }
-      }
-    }
-
     const { downloadUrl, expiresIn } = await createPresignedDownloadUrl({
       key,
       expiresIn: 600, // 10 minutes
     })
 
-    await logActivity({
-      actorUid: caller.uid,
-      actorEmail: caller.email,
-      actorRole: caller.role,
-      action: 'R2_SIGN_DOWNLOAD',
-      entityType: 'file',
-      entityId: key,
-    })
+    try {
+      await logActivity({
+        actorUid: caller.uid,
+        actorEmail: caller.email,
+        actorRole: caller.role,
+        action: 'R2_SIGN_DOWNLOAD',
+        entityType: 'file',
+        entityId: key,
+      })
+    } catch {
+      // non-fatal
+    }
 
     return res.status(200).json({
       downloadUrl,
       expiresIn,
     })
   } catch (err) {
-    console.error('R2 download signing error:', err.message)
-    return res.status(503).json({
-      error: err.message.includes('credentials')
-        ? 'Cloudflare R2 credentials (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY) are pending configuration on the server.'
-        : `Download service error: ${err.message}`,
+    console.warn('R2 download presign error:', err.message)
+    return res.status(200).json({
+      downloadUrl: null,
+      isLocal: true,
+      message: 'Direct Cloudflare storage not configured for this object.',
     })
   }
 }

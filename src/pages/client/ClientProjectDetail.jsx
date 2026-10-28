@@ -103,9 +103,9 @@ export function ClientProjectDetail() {
                 Chat with Team
               </Button>
             </Link>
-            <Link to="/portal/submissions">
-              <Button variant="primary" size="sm" icon={Send}>
-                Submit Feedback / Request
+            <Link to="/portal/deliverables">
+              <Button variant="primary" size="sm" icon={FileBox}>
+                Post Document / Review
               </Button>
             </Link>
           </div>

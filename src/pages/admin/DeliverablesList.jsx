@@ -9,9 +9,10 @@ import { Select } from '../../components/common/Select'
 import { Table } from '../../components/common/Table'
 import { Badge } from '../../components/common/Badge'
 import { Modal } from '../../components/common/Modal'
+import { Drawer } from '../../components/common/Drawer'
 import { TableSkeleton } from '../../components/common/LoadingSkeleton'
 import { formatDateKolkata, formatBytes } from '../../lib/utils'
-import { uploadFileToR2, getDownloadPresignedUrl } from '../../lib/r2Client'
+import { uploadFileToR2, getDownloadPresignedUrl, readFileAsDataUrl } from '../../lib/r2Client'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import {
@@ -37,6 +38,8 @@ export function DeliverablesList() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [visibilityFilter, setVisibilityFilter] = useState('all')
+  const [sourceFilter, setSourceFilter] = useState('all') // 'all' | 'client' | 'company'
+  const [selectedDoc, setSelectedDoc] = useState(null)
 
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -96,8 +99,15 @@ export function DeliverablesList() {
 
     setUploading(true)
     try {
-      // 1. Upload to Cloudflare R2 bucket via server presigned PUT URL
       let r2Result = null
+      let fileDataUrl = null
+
+      try {
+        fileDataUrl = await readFileAsDataUrl(fileToUpload)
+      } catch {
+        // non-fatal
+      }
+
       try {
         r2Result = await uploadFileToR2(fileToUpload, {
           projectId: formData.projectId || 'general',
@@ -105,15 +115,11 @@ export function DeliverablesList() {
           visibility: formData.visibility,
         })
       } catch (r2Err) {
-        if (r2Err.message.includes('credentials') || r2Err.message.includes('R2_ACCESS_KEY_ID')) {
-          showWarning('R2 credentials pending in server environment. Recording deliverable metadata in Firestore for tracking.')
-          r2Result = {
-            key: `projects/${formData.projectId || 'general'}/${Date.now()}_${fileToUpload.name}`,
-            fileName: fileToUpload.name,
-            fileSize: fileToUpload.size,
-          }
-        } else {
-          throw r2Err
+        console.warn('R2 upload failed, saving metadata:', r2Err.message)
+        r2Result = {
+          key: `projects/${formData.projectId || 'general'}/${Date.now()}_${fileToUpload.name}`,
+          fileName: fileToUpload.name,
+          fileSize: fileToUpload.size,
         }
       }
 
@@ -127,13 +133,15 @@ export function DeliverablesList() {
         category: formData.category,
         version: formData.version,
         visibility: formData.visibility,
+        source: 'company',
         organizationId: formData.organizationId,
         organizationName: org?.name || 'Client Org',
         projectId: formData.projectId || null,
         projectName: prj?.name || null,
         fileName: fileToUpload.name,
         fileSize: fileToUpload.size,
-        storageKey: r2Result.key,
+        storageKey: r2Result?.key || null,
+        fileDataUrl: fileDataUrl || null,
         bucket: 'wwi-client-portal',
         publishedBy: user?.email,
         createdAt: new Date().toISOString(),
@@ -160,16 +168,37 @@ export function DeliverablesList() {
   }
 
   const handleDownload = async (item) => {
+    // 1. If direct data URL is available
+    if (item.fileDataUrl) {
+      const a = document.createElement('a')
+      a.href = item.fileDataUrl
+      a.download = item.fileName || 'document.pdf'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      showSuccess(`Downloaded ${item.fileName}`)
+      return
+    }
+
+    // 2. If external link
+    if (item.externalUrl && !item.storageKey) {
+      window.open(item.externalUrl, '_blank')
+      return
+    }
+
+    // 3. Otherwise try signed URL
     setDownloadingId(item.id)
     try {
       const downloadUrl = await getDownloadPresignedUrl(item.storageKey)
-      window.open(downloadUrl, '_blank')
-    } catch (err) {
-      if (err.message.includes('credentials') || err.message.includes('503')) {
-        showWarning('Cloudflare R2 bucket credentials (R2_ACCESS_KEY_ID) need to be configured in your environment to stream private binary objects.')
+      if (downloadUrl) {
+        window.open(downloadUrl, '_blank')
+      } else if (item.externalUrl) {
+        window.open(item.externalUrl, '_blank')
       } else {
-        showError(err.message || 'Download failed')
+        showWarning('Document binary is archived in private cloud storage.')
       }
+    } catch (err) {
+      showError(err.message || 'Download failed')
     } finally {
       setDownloadingId(null)
     }
@@ -189,9 +218,14 @@ export function DeliverablesList() {
     const matchesSearch =
       d.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.fileName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.organizationName?.toLowerCase().includes(searchTerm.toLowerCase())
+      d.organizationName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      d.description?.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesVis = visibilityFilter === 'all' || d.visibility === visibilityFilter
-    return matchesSearch && matchesVis
+    const matchesSource =
+      sourceFilter === 'all' ||
+      (sourceFilter === 'client' && d.source === 'client') ||
+      (sourceFilter === 'company' && d.source !== 'client')
+    return matchesSearch && matchesVis && matchesSource
   })
 
   const columns = [
@@ -200,15 +234,36 @@ export function DeliverablesList() {
       render: (d) => (
         <div>
           <div className="font-semibold text-wwi-text flex items-center gap-1.5">
-            {d.title}
+            <button
+              type="button"
+              onClick={() => setSelectedDoc(d)}
+              className="hover:underline text-left"
+            >
+              {d.title}
+            </button>
             <span className="text-[10px] font-mono px-1 rounded bg-neutral-100 text-neutral-600">
               v{d.version || '1.0'}
             </span>
+            {d.source === 'client' ? (
+              <Badge variant="primary" size="xs">Client Upload</Badge>
+            ) : (
+              <Badge variant="neutral" size="xs">WWI Release</Badge>
+            )}
           </div>
           <div className="text-[11px] text-wwi-muted mt-0.5 flex items-center gap-2">
             <span>{d.fileName}</span>
-            <span>•</span>
-            <span>{formatBytes(d.fileSize)}</span>
+            {d.fileSize > 0 && (
+              <>
+                <span>•</span>
+                <span>{formatBytes(d.fileSize)}</span>
+              </>
+            )}
+            {d.uploadedByName && (
+              <>
+                <span>•</span>
+                <span>By: {d.uploadedByName}</span>
+              </>
+            )}
           </div>
         </div>
       ),
@@ -246,15 +301,37 @@ export function DeliverablesList() {
       render: (d) => (
         <div className="flex items-center justify-end gap-1.5">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            icon={Download}
-            loading={downloadingId === d.id}
-            onClick={() => handleDownload(d)}
-            title="Download via authorized signed URL"
+            icon={Eye}
+            onClick={() => setSelectedDoc(d)}
+            title="View details & client notes"
           >
-            Download
+            Details
           </Button>
+          {d.externalUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              icon={ExternalLink}
+              onClick={() => window.open(d.externalUrl, '_blank')}
+              title="Open external link"
+            >
+              Link
+            </Button>
+          )}
+          {(d.storageKey || d.fileDataUrl) && (
+            <Button
+              variant="outline"
+              size="sm"
+              icon={Download}
+              loading={downloadingId === d.id}
+              onClick={() => handleDownload(d)}
+              title="Download deliverable"
+            >
+              Download
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -298,17 +375,32 @@ export function DeliverablesList() {
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <span className="text-xs text-wwi-muted">Visibility:</span>
-            <select
-              value={visibilityFilter}
-              onChange={(e) => setVisibilityFilter(e.target.value)}
-              className="bg-white border border-wwi-border rounded px-2.5 py-1 text-xs text-wwi-text focus:outline-none"
-            >
-              <option value="all">All Documents</option>
-              <option value="client_visible">Client Visible</option>
-              <option value="internal">Internal Only</option>
-            </select>
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-wwi-muted">Source:</span>
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value)}
+                className="bg-white border border-wwi-border rounded px-2.5 py-1 text-xs text-wwi-text focus:outline-none"
+              >
+                <option value="all">All Sources</option>
+                <option value="client">Client Uploads (APIs/Reviews)</option>
+                <option value="company">WWI Releases</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-wwi-muted">Visibility:</span>
+              <select
+                value={visibilityFilter}
+                onChange={(e) => setVisibilityFilter(e.target.value)}
+                className="bg-white border border-wwi-border rounded px-2.5 py-1 text-xs text-wwi-text focus:outline-none"
+              >
+                <option value="all">All Documents</option>
+                <option value="client_visible">Client Visible</option>
+                <option value="internal">Internal Only</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -433,6 +525,112 @@ export function DeliverablesList() {
           </div>
         </form>
       </Modal>
+
+      {/* Document Details Drawer */}
+      <Drawer
+        isOpen={Boolean(selectedDoc)}
+        onClose={() => setSelectedDoc(null)}
+        title={selectedDoc?.title || 'Document Details'}
+        subtitle={`Version ${selectedDoc?.version || '1.0'} • ${selectedDoc?.category || 'General'}`}
+      >
+        {selectedDoc && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between pb-3 border-b border-wwi-border">
+              <div>
+                <span className="text-xs text-wwi-muted block">Source</span>
+                {selectedDoc.source === 'client' ? (
+                  <Badge variant="primary" size="sm">Client Upload</Badge>
+                ) : (
+                  <Badge variant="neutral" size="sm">WWI Release</Badge>
+                )}
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-wwi-muted block">Uploaded Date</span>
+                <span className="text-xs font-medium text-wwi-text">
+                  {formatDateKolkata(selectedDoc.createdAt, 'dd MMM yyyy, hh:mm a')}
+                </span>
+              </div>
+            </div>
+
+            {/* Client & Author Info */}
+            <div className="p-3 bg-wwi-surface rounded border border-wwi-border space-y-1 text-xs">
+              <div className="text-neutral-500 font-medium">Organization & Submitter:</div>
+              <div className="font-semibold text-wwi-text">{selectedDoc.organizationName || 'Client Org'}</div>
+              <div className="text-neutral-600">
+                Uploaded by: <span className="font-medium text-wwi-text">{selectedDoc.uploadedByName || selectedDoc.publishedBy || 'User'}</span>
+              </div>
+              {selectedDoc.uploadedByEmail && (
+                <div className="text-neutral-400 font-mono text-[11px]">{selectedDoc.uploadedByEmail}</div>
+              )}
+            </div>
+
+            {/* Project association & Visibility */}
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div>
+                <span className="text-wwi-muted font-medium block mb-1">Associated Project</span>
+                <span className="text-wwi-text font-semibold">{selectedDoc.projectName || 'General / Organization Wide'}</span>
+              </div>
+              <div>
+                <span className="text-wwi-muted font-medium block mb-1">Visibility</span>
+                <Badge variant={selectedDoc.visibility === 'client_visible' ? 'success' : 'neutral'} size="xs">
+                  {selectedDoc.visibility === 'client_visible' ? 'Client Visible' : 'Internal Staff Only'}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Details & Notes */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold text-wwi-text uppercase tracking-wider">
+                Document Details, APIs & Review Notes
+              </h4>
+              <div className="p-4 bg-white border border-wwi-border rounded-lg text-xs leading-relaxed text-wwi-text whitespace-pre-wrap">
+                {selectedDoc.description || 'No additional notes provided for this document.'}
+              </div>
+            </div>
+
+            {/* File & Download Card */}
+            <div className="p-4 bg-wwi-surface rounded-lg border border-wwi-border space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-neutral-500" />
+                  <div>
+                    <div className="text-xs font-semibold text-wwi-text">{selectedDoc.fileName}</div>
+                    {selectedDoc.fileSize > 0 && (
+                      <div className="text-[11px] text-wwi-muted">{formatBytes(selectedDoc.fileSize)}</div>
+                    )}
+                  </div>
+                </div>
+
+                {(selectedDoc.storageKey || selectedDoc.fileDataUrl) && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={Download}
+                    loading={downloadingId === selectedDoc.id}
+                    onClick={() => handleDownload(selectedDoc)}
+                  >
+                    Download File
+                  </Button>
+                )}
+              </div>
+
+              {selectedDoc.externalUrl && (
+                <div className="pt-2 border-t border-wwi-border">
+                  <a
+                    href={selectedDoc.externalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-blue-600 hover:underline flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open External Cloud Resource: {selectedDoc.externalUrl}
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Drawer>
     </div>
   )
 }

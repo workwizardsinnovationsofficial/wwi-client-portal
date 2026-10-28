@@ -20,13 +20,13 @@ export function Login() {
     setLoading(true)
 
     try {
-      await login(email, password)
-      // Navigate based on role once context updates; default to /admin or /portal
-      navigate('/admin')
+      const loggedIn = await login(email, password)
+      const isClient = loggedIn?.role === 'client' || (!email.toLowerCase().includes('wwi-admin') && !email.toLowerCase().includes('@wwi.org.in'))
+      navigate(isClient ? '/portal' : '/admin')
     } catch (err) {
       console.error('Sign-in error:', err)
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        setError('Invalid official email or password. Please verify and try again.')
+        setError('Invalid credentials. Please verify your username, email, or password and try again.')
       } else if (err.code === 'auth/too-many-requests') {
         setError('Too many failed sign-in attempts. Please wait a few minutes or reset your password.')
       } else {

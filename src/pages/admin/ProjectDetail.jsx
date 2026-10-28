@@ -17,6 +17,7 @@ import { Card } from '../../components/common/Card'
 import { Button } from '../../components/common/Button'
 import { Badge } from '../../components/common/Badge'
 import { Input } from '../../components/common/Input'
+import { Select } from '../../components/common/Select'
 import { Modal } from '../../components/common/Modal'
 import { formatDateKolkata } from '../../lib/utils'
 import { useToast } from '../../context/ToastContext'
@@ -32,6 +33,7 @@ import {
   AlertCircle,
   Eye,
   Lock,
+  Sliders,
 } from 'lucide-react'
 
 export function ProjectDetail() {
@@ -49,6 +51,43 @@ export function ProjectDetail() {
   const [blockers, setBlockers] = useState('')
   const [nextActions, setNextActions] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
+
+  // Project progress modal state
+  const [progressModalOpen, setProgressModalOpen] = useState(false)
+  const [progressForm, setProgressForm] = useState({
+    completionPercentage: 0,
+    status: 'in_progress',
+  })
+  const [updatingProgress, setUpdatingProgress] = useState(false)
+
+  const handleOpenProgressModal = () => {
+    setProgressForm({
+      completionPercentage: project?.completionPercentage || 0,
+      status: project?.status || 'in_progress',
+    })
+    setProgressModalOpen(true)
+  }
+
+  const handleSaveProgress = async (e) => {
+    e.preventDefault()
+    setUpdatingProgress(true)
+    try {
+      const percentage = Math.min(100, Math.max(0, Number(progressForm.completionPercentage) || 0))
+      const newStatus = percentage === 100 ? 'completed' : progressForm.status
+
+      await updateDoc(doc(db, 'projects', projectId), {
+        completionPercentage: percentage,
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      })
+      showSuccess(`Project progress updated to ${percentage}%`)
+      setProgressModalOpen(false)
+    } catch (err) {
+      showError(err.message || 'Failed to update progress')
+    } finally {
+      setUpdatingProgress(false)
+    }
+  }
 
   // Milestone modal state
   const [milestoneModalOpen, setMilestoneModalOpen] = useState(false)
@@ -245,6 +284,14 @@ export function ProjectDetail() {
                   />
                 </div>
                 <span className="text-xs font-bold font-mono">{project.completionPercentage || 0}%</span>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  icon={Sliders}
+                  onClick={handleOpenProgressModal}
+                >
+                  Update
+                </Button>
               </div>
             </div>
 
@@ -416,6 +463,74 @@ export function ProjectDetail() {
             </Button>
             <Button type="submit" variant="primary">
               Add Milestone
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Update Project Progress Modal */}
+      <Modal
+        isOpen={progressModalOpen}
+        onClose={() => setProgressModalOpen(false)}
+        title={`Update Project Progress: ${project.name}`}
+        description="Set the project completion percentage directly and update overall delivery state."
+      >
+        <form onSubmit={handleSaveProgress} className="space-y-4">
+          <div className="p-3.5 bg-neutral-50 border border-wwi-border rounded-lg space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-wwi-text">Completion Percentage:</span>
+              <span className="font-mono font-bold text-base text-wwi-text">
+                {progressForm.completionPercentage}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={progressForm.completionPercentage}
+              onChange={(e) => setProgressForm({ ...progressForm, completionPercentage: Number(e.target.value) })}
+              className="w-full h-2 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-black"
+            />
+            <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
+              <span>0% (Not Started)</span>
+              <span>25%</span>
+              <span>50%</span>
+              <span>75%</span>
+              <span>100% (Completed)</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Exact Percentage (0-100)"
+              type="number"
+              min="0"
+              max="100"
+              required
+              value={progressForm.completionPercentage}
+              onChange={(e) => setProgressForm({ ...progressForm, completionPercentage: Number(e.target.value) })}
+            />
+            <Select
+              label="Project Status"
+              value={progressForm.status}
+              onChange={(e) => setProgressForm({ ...progressForm, status: e.target.value })}
+              options={[
+                { value: 'planning', label: 'Planning & Discovery' },
+                { value: 'in_progress', label: 'In Progress (Active)' },
+                { value: 'in_review', label: 'In Client Review / UAT' },
+                { value: 'completed', label: 'Completed & Delivered' },
+                { value: 'on_hold', label: 'On Hold' },
+              ]}
+            />
+          </div>
+
+          <div className="pt-3 border-t border-wwi-border flex items-center justify-end gap-2">
+            <Button variant="secondary" onClick={() => setProgressModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={updatingProgress}>
+              Save Progress
             </Button>
           </div>
         </form>

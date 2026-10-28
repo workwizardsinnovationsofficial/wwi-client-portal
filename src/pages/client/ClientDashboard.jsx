@@ -99,9 +99,9 @@ export function ClientDashboard() {
                 Request Meeting
               </Button>
             </Link>
-            <Link to="/portal/submissions">
-              <Button variant="primary" size="sm" icon={Send}>
-                Submit Request
+            <Link to="/portal/deliverables">
+              <Button variant="primary" size="sm" icon={FileBox}>
+                Post Document
               </Button>
             </Link>
           </div>

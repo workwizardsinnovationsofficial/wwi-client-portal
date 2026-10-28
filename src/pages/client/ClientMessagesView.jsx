@@ -16,19 +16,29 @@ import { Badge } from '../../components/common/Badge'
 import { formatDateKolkata, getInitials } from '../../lib/utils'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
-import { MessageSquare, Send } from 'lucide-react'
+import { MessageSquare, Send, Bell, BellRing, CheckCircle2 } from 'lucide-react'
+import {
+  isNotificationSupported,
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendWebNotification,
+} from '../../lib/webNotifications'
 
 export function ClientMessagesView() {
   const { user, userProfile, organization, organizationId } = useAuth()
-  const { showError } = useToast()
+  const { showSuccess, showError } = useToast()
 
   const [projects, setProjects] = useState([])
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [notificationPermission, setNotificationPermission] = useState(getNotificationPermission())
+  const [promptDismissed, setPromptDismissed] = useState(false)
 
   const messagesEndRef = useRef(null)
+  const isFirstSnapshot = useRef(true)
+  const prevCount = useRef(0)
 
   // 1. Fetch Projects belonging to this client org
   useEffect(() => {
@@ -55,6 +65,9 @@ export function ClientMessagesView() {
       return
     }
 
+    isFirstSnapshot.current = true
+    prevCount.current = 0
+
     const q = query(
       collection(db, 'messages'),
       where('projectId', '==', selectedProjectId),
@@ -67,7 +80,24 @@ export function ClientMessagesView() {
         const list = []
         snap.forEach((d) => list.push({ id: d.id, ...d.data() }))
         list.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
+
+        // Trigger web desktop notification if a new message arrives from the team
+        if (!isFirstSnapshot.current && list.length > prevCount.current) {
+          const incoming = list.slice(prevCount.current)
+          incoming.forEach((m) => {
+            if (m.senderId !== user?.uid) {
+              sendWebNotification(`WWI Team: ${m.senderName || 'New Message'}`, {
+                body: m.text,
+                tag: `msg-${m.id}`,
+              })
+            }
+          })
+        }
+
+        isFirstSnapshot.current = false
+        prevCount.current = list.length
         setMessages(list)
+
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
         }, 100)
@@ -78,7 +108,21 @@ export function ClientMessagesView() {
     )
 
     return () => unsub()
-  }, [selectedProjectId])
+  }, [selectedProjectId, user?.uid])
+
+  const handleRequestPermission = async () => {
+    const perm = await requestNotificationPermission()
+    setNotificationPermission(perm)
+    if (perm === 'granted') {
+      showSuccess('Web notifications enabled! You will be alerted when new messages arrive.')
+      sendWebNotification('Notifications Enabled', {
+        body: 'Work Wizards Innovations project chat alerts are active on this device.',
+      })
+    } else if (perm === 'denied') {
+      showError('Notification permission was blocked in browser settings.')
+    }
+  }
+
 
   const handleSendMessage = async (e) => {
     e.preventDefault()
@@ -156,6 +200,34 @@ export function ClientMessagesView() {
 
         {/* Right 3 Cols: Realtime Message Thread */}
         <div className="lg:col-span-3 flex flex-col h-full bg-white">
+          {/* Permission Prompt Banner */}
+          {notificationPermission === 'default' && !promptDismissed && isNotificationSupported() && (
+            <div className="px-4 py-2.5 bg-neutral-900 text-white flex items-center justify-between text-xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <BellRing className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
+                <span>
+                  <strong>Enable Web Push Notifications:</strong> Get notified instantly when the WWI technical team replies.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRequestPermission}
+                  className="px-2.5 py-1 rounded bg-white text-black text-xs font-semibold hover:bg-neutral-100 transition"
+                >
+                  Allow Notifications
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPromptDismissed(true)}
+                  className="text-neutral-400 hover:text-white text-xs px-1"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="p-3.5 border-b border-wwi-border flex items-center justify-between">
             <div>
               <div className="text-xs font-semibold text-wwi-text">
@@ -165,7 +237,30 @@ export function ClientMessagesView() {
                 {activeProject ? `Project Code: ${activeProject.code}` : ''}
               </div>
             </div>
+
+            <div className="flex items-center gap-2">
+              {notificationPermission === 'granted' ? (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-50 text-green-700 border border-green-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                  Live Alerts Active
+                </span>
+              ) : notificationPermission === 'denied' ? (
+                <span className="text-[11px] text-neutral-400" title="Notifications blocked in browser permissions">
+                  Alerts Muted
+                </span>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  icon={Bell}
+                  onClick={handleRequestPermission}
+                >
+                  Enable Alerts
+                </Button>
+              )}
+            </div>
           </div>
+
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map((m) => {

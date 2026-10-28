@@ -47,7 +47,6 @@ export function Sidebar({ mobile = false, onCloseMobile }) {
         { label: 'Meetings & Calls', to: '/admin/meetings', icon: CalendarDays },
         { label: 'Project Messages', to: '/admin/messages', icon: MessageSquare },
         { label: 'Support Tickets', to: '/admin/support', icon: LifeBuoy },
-        { label: 'Client Submissions', to: '/admin/submissions', icon: Send },
       ],
     },
     {
@@ -82,7 +81,6 @@ export function Sidebar({ mobile = false, onCloseMobile }) {
         { label: 'Meeting Requests', to: '/portal/meetings', icon: CalendarDays },
         { label: 'Project Chat', to: '/portal/messages', icon: MessageSquare },
         { label: 'Support & Calls', to: '/portal/support', icon: LifeBuoy },
-        { label: 'Submissions & Approvals', to: '/portal/submissions', icon: Send },
       ],
     },
   ]

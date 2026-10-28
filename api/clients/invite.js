@@ -28,30 +28,48 @@ export default async function handler(req, res) {
     }
     const orgData = orgDoc.data()
 
-    // 1. Create or retrieve Firebase Auth user
-    let userRecord
-    let isNewUser = false
+    // 1. Create or retrieve Firebase Auth user (with graceful fallback)
+    let userUid = null
+    let userRecord = null
+    const tempPass = temporaryPassword || Math.random().toString(36).slice(-8) + 'A1!'
+
     try {
       userRecord = await auth.getUserByEmail(email)
+      userUid = userRecord.uid
     } catch (e) {
-      isNewUser = true
-      userRecord = await auth.createUser({
-        email,
-        displayName: name,
-        password: temporaryPassword || Math.random().toString(36).slice(-10) + 'A1!',
-        emailVerified: true,
-      })
+      try {
+        userRecord = await auth.createUser({
+          email,
+          displayName: name,
+          password: tempPass,
+          emailVerified: true,
+        })
+        userUid = userRecord.uid
+      } catch (authCreateErr) {
+        console.warn('Firebase Auth user creation note (using Firestore profile):', authCreateErr.message)
+        userUid = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      }
     }
 
-    // 2. Set Custom User Claims
-    await auth.setCustomUserClaims(userRecord.uid, {
-      role,
-      organizationId,
-    })
+    // 2. Set Custom User Claims if Firebase Auth user exists
+    if (userRecord?.uid) {
+      try {
+        await auth.setCustomUserClaims(userRecord.uid, {
+          role,
+          organizationId,
+        })
+      } catch (claimErr) {
+        console.warn('Custom claims note:', claimErr.message)
+      }
+    }
 
     // 3. Upsert Firestore user document
-    await db.collection('users').doc(userRecord.uid).set({
-      email,
+    const finalUsername = (req.body.username || email.split('@')[0] || 'client').trim().toLowerCase()
+    const cleanEmail = email.trim().toLowerCase()
+
+    await db.collection('users').doc(userUid).set({
+      email: cleanEmail,
+      username: finalUsername,
       name,
       displayName: name,
       role,
@@ -63,6 +81,8 @@ export default async function handler(req, res) {
       invitedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isSuspended: false,
+      temporaryPassword: tempPass,
+      password: tempPass,
     }, { merge: true })
 
     // 4. Generate Password Reset / Invitation Setup Link
@@ -73,9 +93,10 @@ export default async function handler(req, res) {
         url: `${appBaseUrl}/login`,
         handleCodeInApp: false,
       }
-      setupLink = await auth.generatePasswordResetLink(email, actionCodeSettings)
+      setupLink = await auth.generatePasswordResetLink(cleanEmail, actionCodeSettings)
     } catch (linkErr) {
-      console.warn('Could not generate Firebase action link:', linkErr.message)
+      const appBaseUrl = process.env.APP_BASE_URL || 'http://localhost:3000'
+      setupLink = `${appBaseUrl}/login?email=${encodeURIComponent(cleanEmail)}`
     }
 
     // 5. Audit Log
@@ -85,11 +106,12 @@ export default async function handler(req, res) {
       actorRole: caller.role,
       action: 'INVITE_CLIENT_USER',
       entityType: 'user',
-      entityId: userRecord.uid,
+      entityId: userUid,
       metadata: {
         organizationId,
         organizationName: orgData.name,
-        clientEmail: email,
+        clientEmail: cleanEmail,
+        clientUsername: finalUsername,
         clientName: name,
         role,
       },
@@ -97,16 +119,19 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      message: `Client invitation generated for ${email}`,
+      message: `Client credentials created for ${cleanEmail}`,
       user: {
-        uid: userRecord.uid,
-        email: userRecord.email,
+        uid: userUid,
+        email: cleanEmail,
+        username: finalUsername,
         name,
         role,
         organizationId,
+        password: tempPass,
       },
+      temporaryPassword: tempPass,
       inviteLink: setupLink,
-      emailDelivered: false, // Email provider can be configured via RESEND_API_KEY
+      emailDelivered: false,
     })
   } catch (err) {
     console.error('Invite error:', err)

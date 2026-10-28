@@ -5,11 +5,23 @@ export async function authenticateRequest(req, res, allowedRoles = []) {
     const decodedToken = await verifyAuthToken(req)
     const uid = decodedToken.uid
 
-    const fbAdmin = getFirebaseAdmin()
-    const db = fbAdmin.firestore()
-    const userDoc = await db.collection('users').doc(uid).get()
+    if (decodedToken.role === 'super_admin') {
+      return decodedToken
+    }
 
-    if (!userDoc.exists) {
+    let userData = null
+    try {
+      const fbAdmin = getFirebaseAdmin()
+      const db = fbAdmin.firestore()
+      const userDoc = await db.collection('users').doc(uid).get()
+      if (userDoc.exists) {
+        userData = userDoc.data()
+      }
+    } catch (fbErr) {
+      console.warn('Firebase Admin Firestore lookup bypassed:', fbErr.message)
+    }
+
+    if (!userData) {
       // User might be newly registered or token valid without firestore doc yet
       const role = decodedToken.role || 'client'
       const orgId = decodedToken.organizationId || null
@@ -25,8 +37,6 @@ export async function authenticateRequest(req, res, allowedRoles = []) {
       }
       return user
     }
-
-    const userData = userDoc.data()
 
     if (userData.isSuspended) {
       res.status(403).json({ error: 'Account suspended. Please contact WWI administration.' })

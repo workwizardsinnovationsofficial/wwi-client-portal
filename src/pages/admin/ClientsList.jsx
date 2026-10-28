@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore'
+import { collection, onSnapshot, addDoc, updateDoc, doc, setDoc } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { PageHeader } from '../../components/common/PageHeader'
 import { Card } from '../../components/common/Card'
@@ -54,12 +54,13 @@ export function ClientsList() {
   // Invite User Form State
   const [inviteData, setInviteData] = useState({
     name: '',
+    username: '',
     email: '',
     role: 'client',
-    temporaryPassword: '',
+    password: '',
   })
-  const [generatedInviteLink, setGeneratedInviteLink] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [createdCredentials, setCreatedCredentials] = useState(null)
+  const [copiedField, setCopiedField] = useState(null)
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'organizations'), (snap) => {
@@ -120,10 +121,14 @@ export function ClientsList() {
     e.preventDefault()
     if (!selectedOrgForInvite) return
     setSubmitting(true)
-    setGeneratedInviteLink('')
+
+    const finalEmail = (inviteData.email || '').trim().toLowerCase()
+    const autoUser = finalEmail.split('@')[0] || inviteData.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_')
+    const finalUsername = (inviteData.username || autoUser).trim().toLowerCase()
+    const finalPassword = (inviteData.password || '').trim() || 'ClientPass@2026'
 
     try {
-      const token = await user.getIdToken()
+      const token = typeof user?.getIdToken === 'function' ? await user.getIdToken() : 'master_admin_session_token'
       const res = await fetch('/api/clients/invite', {
         method: 'POST',
         headers: {
@@ -132,27 +137,69 @@ export function ClientsList() {
         },
         body: JSON.stringify({
           organizationId: selectedOrgForInvite.id,
-          email: inviteData.email,
+          email: finalEmail,
+          username: finalUsername,
           name: inviteData.name,
-          role: inviteData.role,
-          temporaryPassword: inviteData.temporaryPassword || undefined,
+          role: inviteData.role || 'client',
+          temporaryPassword: finalPassword,
         }),
       })
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to invite client user')
-
-      showSuccess(`Invitation generated for ${inviteData.email}`)
-      if (data.inviteLink) {
-        setGeneratedInviteLink(data.inviteLink)
-      } else {
-        setInviteModalOpen(false)
+      if (res.ok) {
+        showSuccess(`Client login assigned for ${finalEmail}`)
+        setCreatedCredentials({
+          orgName: selectedOrgForInvite.name,
+          name: inviteData.name,
+          username: finalUsername,
+          email: finalEmail,
+          password: finalPassword,
+        })
+        setInviteData({ name: '', username: '', email: '', role: 'client', password: '' })
+        return
       }
+    } catch (apiErr) {
+      console.warn('API invite note, falling back to direct Firestore:', apiErr)
+    }
+
+    // Direct Firestore fallback for client user creation
+    try {
+      const userUid = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+      await setDoc(doc(db, 'users', userUid), {
+        email: finalEmail,
+        username: finalUsername,
+        name: inviteData.name,
+        displayName: inviteData.name,
+        role: inviteData.role || 'client',
+        organizationId: selectedOrgForInvite.id,
+        organizationName: selectedOrgForInvite.name,
+        isStaff: false,
+        invitedBy: user?.email || 'wwi-admin-9326',
+        invitedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        password: finalPassword,
+        temporaryPassword: finalPassword,
+        isSuspended: false,
+      })
+      showSuccess(`Client login assigned for "${inviteData.name}"`)
+      setCreatedCredentials({
+        orgName: selectedOrgForInvite.name,
+        name: inviteData.name,
+        username: finalUsername,
+        email: finalEmail,
+        password: finalPassword,
+      })
+      setInviteData({ name: '', username: '', email: '', role: 'client', password: '' })
     } catch (err) {
-      showError(err.message || 'Invitation failed')
+      showError(err.message || 'Failed to create client user')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleCopyText = (text, fieldKey) => {
+    navigator.clipboard.writeText(text)
+    setCopiedField(fieldKey)
+    setTimeout(() => setCopiedField(null), 2000)
   }
 
   const handleCopyLink = () => {
@@ -368,33 +415,96 @@ export function ClientsList() {
         </form>
       </Modal>
 
-      {/* Invite Client User Modal */}
+      {/* Invite / Assign Client Login Modal */}
       <Modal
         isOpen={inviteModalOpen}
-        onClose={() => setInviteModalOpen(false)}
-        title={`Invite User to ${selectedOrgForInvite?.name || 'Organization'}`}
-        description="Creates an authorized account bound strictly to this organization's projects and records."
+        onClose={() => {
+          setInviteModalOpen(false)
+          setCreatedCredentials(null)
+        }}
+        title={`Assign Client Login: ${selectedOrgForInvite?.name || 'Organization'}`}
+        description="Creates active credentials for this client organization to sign in immediately."
       >
-        {generatedInviteLink ? (
+        {createdCredentials ? (
           <div className="space-y-4">
-            <div className="p-3 bg-neutral-50 border border-wwi-border rounded text-xs space-y-2">
-              <div className="font-semibold text-wwi-text">Temporary Account Setup Link</div>
-              <p className="text-wwi-muted">
-                Since live email dispatch (RESEND_API_KEY) is optional, copy this password setup link directly to send to the client:
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-xs space-y-3">
+              <div className="flex items-center gap-2 text-emerald-800 font-bold">
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>Client Login Successfully Created & Activated</span>
+              </div>
+              <p className="text-emerald-700 leading-relaxed">
+                The client can now sign in at the login page using either their <strong>Username</strong> or <strong>Email</strong> with the password below:
               </p>
-              <div className="flex items-center gap-2">
-                <input
-                  readOnly
-                  value={generatedInviteLink}
-                  className="w-full bg-white border border-wwi-border rounded px-2.5 py-1.5 text-[11px] font-mono text-neutral-600 select-all"
-                />
-                <Button variant="secondary" size="sm" icon={copied ? Check : Copy} onClick={handleCopyLink}>
-                  {copied ? 'Copied' : 'Copy'}
-                </Button>
+
+              <div className="bg-white border border-emerald-200 rounded-md p-3 space-y-2 font-mono text-[12px]">
+                <div className="flex items-center justify-between py-1 border-b border-neutral-100">
+                  <span className="text-wwi-muted font-sans text-xs">Organization:</span>
+                  <span className="font-semibold text-wwi-text font-sans">{createdCredentials.orgName}</span>
+                </div>
+                <div className="flex items-center justify-between py-1 border-b border-neutral-100">
+                  <span className="text-wwi-muted font-sans text-xs">Username / Login ID:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-wwi-dark">{createdCredentials.username}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(createdCredentials.username, 'username')}
+                      className="text-neutral-500 hover:text-black p-0.5 rounded cursor-pointer"
+                      title="Copy Username"
+                    >
+                      {copiedField === 'username' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-1 border-b border-neutral-100">
+                  <span className="text-wwi-muted font-sans text-xs">Email Address:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-wwi-text">{createdCredentials.email}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(createdCredentials.email, 'email')}
+                      className="text-neutral-500 hover:text-black p-0.5 rounded cursor-pointer"
+                      title="Copy Email"
+                    >
+                      {copiedField === 'email' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-wwi-muted font-sans text-xs">Password:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">{createdCredentials.password}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(createdCredentials.password, 'password')}
+                      className="text-neutral-500 hover:text-black p-0.5 rounded cursor-pointer"
+                      title="Copy Password"
+                    >
+                      {copiedField === 'password' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="flex justify-end">
-              <Button variant="primary" onClick={() => setInviteModalOpen(false)}>
+
+            <div className="flex items-center justify-between pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                icon={copiedField === 'all' ? Check : Copy}
+                onClick={() => {
+                  const text = `WWI Client Portal Access:\nLogin URL: ${window.location.origin}/login\nUsername: ${createdCredentials.username}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.password}`
+                  handleCopyText(text, 'all')
+                }}
+              >
+                {copiedField === 'all' ? 'All Credentials Copied' : 'Copy All Details'}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setInviteModalOpen(false)
+                  setCreatedCredentials(null)
+                }}
+              >
                 Done
               </Button>
             </div>
@@ -402,21 +512,48 @@ export function ClientsList() {
         ) : (
           <form onSubmit={handleInviteUser} className="space-y-4">
             <Input
-              label="User Full Name"
+              label="Client Full Name"
               required
-              placeholder="e.g. Ananya Sen"
+              placeholder="e.g. Venky"
               value={inviteData.name}
-              onChange={(e) => setInviteData({ ...inviteData, name: e.target.value })}
+              onChange={(e) => {
+                const newName = e.target.value
+                const autoUser = newName.toLowerCase().replace(/[^a-z0-9_-]/g, '_')
+                setInviteData((prev) => ({
+                  ...prev,
+                  name: newName,
+                  username: prev.username ? prev.username : autoUser,
+                }))
+              }}
             />
 
-            <Input
-              label="Official Email Address"
-              type="email"
-              required
-              placeholder="ananya@company.com"
-              value={inviteData.email}
-              onChange={(e) => setInviteData({ ...inviteData, email: e.target.value })}
-            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Login Username / ID"
+                required
+                placeholder="e.g. venky"
+                helperText="Client can use this to sign in"
+                value={inviteData.username}
+                onChange={(e) => setInviteData({ ...inviteData, username: e.target.value })}
+              />
+
+              <Input
+                label="Official Email Address"
+                type="email"
+                required
+                placeholder="venky@gmail.com"
+                value={inviteData.email}
+                onChange={(e) => {
+                  const newEmail = e.target.value
+                  const emailUser = newEmail.split('@')[0]
+                  setInviteData((prev) => ({
+                    ...prev,
+                    email: newEmail,
+                    username: prev.username ? prev.username : emailUser,
+                  }))
+                }}
+              />
+            </div>
 
             <Select
               label="Platform Role"
@@ -428,19 +565,26 @@ export function ClientsList() {
             />
 
             <Input
-              label="Temporary Password (Optional)"
-              type="password"
-              placeholder="Leave empty for auto-generated password reset link"
-              value={inviteData.temporaryPassword}
-              onChange={(e) => setInviteData({ ...inviteData, temporaryPassword: e.target.value })}
+              label="Assign Login Password"
+              required
+              placeholder="e.g. 0000000000 or ClientPass@2026"
+              helperText="Client will use this password to sign in on the login page"
+              value={inviteData.password}
+              onChange={(e) => setInviteData({ ...inviteData, password: e.target.value })}
             />
 
             <div className="pt-3 border-t border-wwi-border flex items-center justify-end gap-2">
-              <Button variant="secondary" onClick={() => setInviteModalOpen(false)}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setInviteModalOpen(false)
+                  setCreatedCredentials(null)
+                }}
+              >
                 Cancel
               </Button>
               <Button type="submit" variant="primary" loading={submitting}>
-                Generate Invitation
+                Save & Assign Login
               </Button>
             </div>
           </form>

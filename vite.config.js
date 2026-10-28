@@ -1,7 +1,8 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import { URL } from 'url'
+import { URL, pathToFileURL } from 'url'
+import fs from 'fs'
 
 // Vite plugin to execute Vercel serverless /api endpoints in local dev
 function apiDevPlugin() {
@@ -14,16 +15,24 @@ function apiDevPlugin() {
         }
 
         const urlPath = req.url.split('?')[0]
-        const relativeFilePath = '.' + urlPath + '.js'
-        const altFilePath = '.' + urlPath + '/index.js'
+        const absolutePath = path.resolve(process.cwd(), '.' + urlPath + '.js')
+        const altAbsolutePath = path.resolve(process.cwd(), '.' + urlPath + '/index.js')
+
+        let targetFile = null
+        if (fs.existsSync(absolutePath)) {
+          targetFile = absolutePath
+        } else if (fs.existsSync(altAbsolutePath)) {
+          targetFile = altAbsolutePath
+        }
 
         let handlerModule = null
-        try {
-          handlerModule = await import(/* @vite-ignore */ relativeFilePath).catch(() =>
-            import(/* @vite-ignore */ altFilePath)
-          )
-        } catch (e) {
-          // File not found
+        if (targetFile) {
+          try {
+            const fileUrl = pathToFileURL(targetFile).href
+            handlerModule = await import(/* @vite-ignore */ `${fileUrl}?t=${Date.now()}`)
+          } catch (e) {
+            console.error(`Failed to load handler for ${req.url}:`, e)
+          }
         }
 
         if (!handlerModule || typeof handlerModule.default !== 'function') {
@@ -82,20 +91,27 @@ function apiDevPlugin() {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react(), apiDevPlugin()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
+export default defineConfig(({ mode }) => {
+  // Load all environment variables (including serverless backend variables without VITE_ prefix)
+  const env = loadEnv(mode, process.cwd(), '')
+  Object.assign(process.env, env)
+
+  return {
+    plugins: [react(), apiDevPlugin()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
     },
-  },
-  server: {
-    port: 3000,
-    open: false,
-  },
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: './src/test/setup.js',
-  },
+    server: {
+      port: 3000,
+      open: false,
+    },
+    test: {
+      globals: true,
+      environment: 'jsdom',
+      setupFiles: './src/test/setup.js',
+    },
+  }
 })
+

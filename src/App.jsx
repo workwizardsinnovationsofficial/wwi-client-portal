@@ -25,7 +25,6 @@ import { MeetingsList } from './pages/admin/MeetingsList'
 import { DeliverablesList } from './pages/admin/DeliverablesList'
 import { MessagesView } from './pages/admin/MessagesView'
 import { SupportList } from './pages/admin/SupportList'
-import { SubmissionsList } from './pages/admin/SubmissionsList'
 import { TeamManagement } from './pages/admin/TeamManagement'
 import { ActivityAuditLog } from './pages/admin/ActivityAuditLog'
 import { SettingsView } from './pages/admin/SettingsView'
@@ -40,7 +39,6 @@ import { ClientMeetingsList } from './pages/client/ClientMeetingsList'
 import { ClientDeliverablesList } from './pages/client/ClientDeliverablesList'
 import { ClientMessagesView } from './pages/client/ClientMessagesView'
 import { ClientSupportList } from './pages/client/ClientSupportList'
-import { ClientSubmissionsList } from './pages/client/ClientSubmissionsList'
 import { ClientProfile } from './pages/client/ClientProfile'
 
 function RootRedirect() {
@@ -88,7 +86,7 @@ export function App() {
         <Route path="deliverables" element={<DeliverablesList />} />
         <Route path="messages" element={<MessagesView />} />
         <Route path="support" element={<SupportList />} />
-        <Route path="submissions" element={<SubmissionsList />} />
+        <Route path="submissions" element={<Navigate to="/admin/deliverables" replace />} />
         <Route path="team" element={<TeamManagement />} />
         <Route path="activity" element={<ActivityAuditLog />} />
         <Route path="settings" element={<SettingsView />} />
@@ -105,7 +103,7 @@ export function App() {
         <Route path="deliverables" element={<ClientDeliverablesList />} />
         <Route path="messages" element={<ClientMessagesView />} />
         <Route path="support" element={<ClientSupportList />} />
-        <Route path="submissions" element={<ClientSubmissionsList />} />
+        <Route path="submissions" element={<Navigate to="/portal/deliverables" replace />} />
         <Route path="profile" element={<ClientProfile />} />
       </Route>
 
