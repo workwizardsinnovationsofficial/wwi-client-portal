@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
+import { seedClientDataDirectly } from '../../lib/seedDatabase'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts'
 
 export function AdminDashboard() {
@@ -131,18 +132,10 @@ export function AdminDashboard() {
     if (!user) return
     setSeeding(true)
     try {
-      const token = await user.getIdToken()
-      const res = await fetch('/api/seed', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Seed failed')
+      await seedClientDataDirectly(user)
       showSuccess('Live database seeded with enterprise test records!')
     } catch (err) {
+      console.error('Seed error:', err)
       showError(err.message || 'Seed failed')
     } finally {
       setSeeding(false)

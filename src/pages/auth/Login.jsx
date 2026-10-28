@@ -73,11 +73,11 @@ export function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="Official Email"
-              type="email"
+              label="Username or Official Email"
+              type="text"
               required
-              autoComplete="email"
-              placeholder="name@workwizards.in or client@company.com"
+              autoComplete="username"
+              placeholder="wwi-admin-9326 or official@wwi.org.in"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -112,6 +112,27 @@ export function Login() {
               Sign In <ArrowRight className="w-3.5 h-3.5 ml-1" />
             </Button>
           </form>
+
+          {/* Master Admin Fast Sign-In Card */}
+          <div className="mt-5 p-3.5 bg-wwi-surface border border-wwi-border rounded-lg text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-wwi-text">WWI Company Business Admin:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('wwi-admin-9326')
+                  setPassword('wwiPVTLTD@9326')
+                }}
+                className="text-[11px] font-semibold text-wwi-dark underline hover:text-black cursor-pointer"
+              >
+                Auto-fill & Ready
+              </button>
+            </div>
+            <div className="font-mono text-[11px] text-wwi-muted space-y-0.5">
+              <div>Username: <span className="font-semibold text-wwi-text">wwi-admin-9326</span></div>
+              <div>Password: <span className="font-semibold text-wwi-text">wwiPVTLTD@9326</span></div>
+            </div>
+          </div>
 
           <div className="mt-6 pt-6 border-t border-wwi-border flex items-center justify-between text-xs text-wwi-muted">
             <div className="flex items-center gap-1.5">

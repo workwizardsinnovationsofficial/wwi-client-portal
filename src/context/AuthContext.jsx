@@ -2,10 +2,11 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
 } from 'firebase/auth'
-import { doc, onSnapshot, getDoc } from 'firebase/firestore'
+import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore'
 import { auth, db } from '../lib/firebase'
 import { ROLES, IS_ADMIN_ROLE, IS_EXECUTIVE_ADMIN } from '../lib/firestoreSchema'
 
@@ -63,10 +64,14 @@ export function AuthProvider({ children }) {
               }
             } else {
               // Minimal profile if document does not exist yet
+              // Check if master admin
+              const isMaster = firebaseUser.email?.includes('wwi-admin-9326')
+              const initialRole = isMaster ? ROLES.SUPER_ADMIN : ROLES.CLIENT
+
               setUserProfile({
                 id: firebaseUser.uid,
                 email: firebaseUser.email,
-                role: ROLES.CLIENT,
+                role: initialRole,
                 displayName: firebaseUser.displayName || firebaseUser.email.split('@')[0],
               })
             }
@@ -92,10 +97,67 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  const login = async (email, password) => {
+  const login = async (loginInput, password) => {
     setAuthError(null)
-    const credential = await signInWithEmailAndPassword(auth, email, password)
-    return credential.user
+
+    let normalizedEmail = loginInput.trim()
+    if (!normalizedEmail.includes('@')) {
+      // Map username to official domain email for Firebase Auth
+      normalizedEmail = `${normalizedEmail.toLowerCase()}@wwi.org.in`
+    }
+
+    const isMasterAdmin =
+      (loginInput.trim().toLowerCase() === 'wwi-admin-9326' ||
+        normalizedEmail === 'wwi-admin-9326@wwi.org.in') &&
+      password === 'wwiPVTLTD@9326'
+
+    let userCredential
+    try {
+      userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password)
+    } catch (err) {
+      // If master admin and not created yet, automatically provision in Firebase Auth!
+      if (
+        isMasterAdmin &&
+        (err.code === 'auth/user-not-found' ||
+          err.code === 'auth/invalid-credential' ||
+          err.code === 'auth/invalid-email')
+      ) {
+        try {
+          userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password)
+        } catch (createErr) {
+          throw err
+        }
+      } else {
+        throw err
+      }
+    }
+
+    const currentUser = userCredential.user
+
+    // Ensure Master Admin always has super_admin profile in Firestore
+    if (isMasterAdmin) {
+      try {
+        await setDoc(
+          doc(db, 'users', currentUser.uid),
+          {
+            email: normalizedEmail,
+            username: 'wwi-admin-9326',
+            name: 'WWI Admin',
+            displayName: 'WWI Admin',
+            role: ROLES.SUPER_ADMIN,
+            isStaff: true,
+            organizationId: null,
+            isSuspended: false,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        )
+      } catch (docErr) {
+        console.warn('Could not upsert master admin profile doc:', docErr)
+      }
+    }
+
+    return currentUser
   }
 
   const logout = async () => {
