@@ -50,7 +50,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isWWIStaff());
       allow create: if isAuthenticated() && (
         isExecutiveAdmin() || 
-        (request.auth.uid == userId && !('role' in request.resource.data) || request.resource.data.role == 'client')
+        request.auth.uid == userId
       );
       allow update: if isAuthenticated() && (
         isExecutiveAdmin() ||

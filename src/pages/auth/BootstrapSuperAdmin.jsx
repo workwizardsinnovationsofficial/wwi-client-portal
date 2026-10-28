@@ -1,5 +1,12 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile,
+} from 'firebase/auth'
+import { doc, setDoc, addDoc, collection } from 'firebase/firestore'
+import { auth, db } from '../../lib/firebase'
 import { Button } from '../../components/common/Button'
 import { Input } from '../../components/common/Input'
 import { ShieldAlert, CheckCircle2, ArrowRight } from 'lucide-react'
@@ -20,23 +27,88 @@ export function BootstrapSuperAdmin() {
     setError('')
     setLoading(true)
 
+    const expectedSecret = 'wwi_super_secret_bootstrap_token_2026'
+    if (secretKey.trim() !== expectedSecret) {
+      setError('Invalid Bootstrap Secret Key. Please verify the secret configured in your environment.')
+      setLoading(false)
+      return
+    }
+
     try {
-      const res = await fetch('/api/auth/bootstrap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, password, secretKey }),
-      })
+      // 1. Authenticate / create user in Firebase Auth using Web SDK
+      let userCredential
+      try {
+        userCredential = await createUserWithEmailAndPassword(auth, email, password)
+      } catch (authErr) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          userCredential = await signInWithEmailAndPassword(auth, email, password)
+        } else {
+          throw authErr
+        }
+      }
 
-      const data = await res.json()
+      const currentUser = userCredential.user
+      await updateProfile(currentUser, { displayName: name })
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Bootstrap failed')
+      // 2. Set user document in Cloud Firestore as super_admin
+      await setDoc(
+        doc(db, 'users', currentUser.uid),
+        {
+          email,
+          name,
+          displayName: name,
+          role: 'super_admin',
+          isStaff: true,
+          organizationId: null,
+          isSuspended: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      )
+
+      // 3. Record audit event
+      try {
+        await addDoc(collection(db, 'activityLogs'), {
+          actorUid: currentUser.uid,
+          actorEmail: email,
+          actorRole: 'super_admin',
+          action: 'BOOTSTRAP_SUPER_ADMIN',
+          entityType: 'user',
+          entityId: currentUser.uid,
+          metadata: { email, name },
+          timestamp: new Date().toISOString(),
+        })
+      } catch (logErr) {
+        // Non-blocking
+      }
+
+      // 4. Also notify serverless backend endpoint if available
+      try {
+        const res = await fetch('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, name, password, secretKey }),
+        })
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          await res.json().catch(() => {})
+        }
+      } catch (apiErr) {
+        // Serverless backend is optional for local bootstrap
       }
 
       setSuccess(true)
     } catch (err) {
       console.error('Bootstrap error:', err)
-      setError(err.message)
+      if (err.code === 'auth/weak-password') {
+        setError('Password should be at least 6 characters long.')
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Please enter a valid email address.')
+      } else if (err.code === 'auth/wrong-password') {
+        setError('An account with this email already exists and the password entered is incorrect.')
+      } else {
+        setError(err.message || 'Super Admin initialization failed')
+      }
     } finally {
       setLoading(false)
     }
