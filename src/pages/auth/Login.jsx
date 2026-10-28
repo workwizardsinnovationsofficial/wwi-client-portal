@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { Button } from '../../components/common/Button'
 import { Input } from '../../components/common/Input'
-import { ShieldCheck, ArrowRight, Lock, Mail, AlertCircle } from 'lucide-react'
+import { ShieldCheck, ArrowRight, Lock, Mail, AlertCircle, ExternalLink, ArrowLeft } from 'lucide-react'
 
 export function Login() {
   const [email, setEmail] = useState('')
@@ -38,18 +38,31 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-white flex flex-col justify-between py-10 px-4 sm:px-6 lg:px-8">
       {/* Top Header */}
       <div className="flex items-center justify-between max-w-md w-full mx-auto">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded bg-wwi-dark flex items-center justify-center text-white text-xs font-bold tracking-wider">
+        <a
+          href="https://wwi.org.in"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2.5 group hover:opacity-85 transition"
+          title="Visit Work Wizards Innovations Official Website"
+        >
+          <div className="w-7 h-7 rounded bg-wwi-dark flex items-center justify-center text-white text-xs font-bold tracking-wider group-hover:scale-105 transition-transform">
             W
           </div>
-          <span className="text-sm font-bold tracking-tight text-wwi-text uppercase">
+          <span className="text-sm font-bold tracking-tight text-wwi-text uppercase group-hover:underline flex items-center gap-1">
             Work Wizards Innovations
+            <ExternalLink className="w-3 h-3 text-neutral-400 group-hover:text-wwi-text" />
           </span>
-        </div>
-        <span className="text-[11px] font-mono text-neutral-400">Clienter v1.0</span>
+        </a>
+        <Link
+          to="/"
+          className="text-xs text-wwi-muted hover:text-wwi-text transition flex items-center gap-1 font-medium"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Overview
+        </Link>
       </div>
 
       {/* Main Login Card */}
@@ -60,7 +73,7 @@ export function Login() {
               Sign In to Your Workspace
             </h1>
             <p className="text-xs text-wwi-muted mt-1">
-              Enter your credentials to access client projects, invoices, and deliverables.
+              Enter your assigned credentials to access project progress, deliverables, and invoices.
             </p>
           </div>
 
@@ -77,7 +90,7 @@ export function Login() {
               type="text"
               required
               autoComplete="username"
-              placeholder="wwi-admin-9326 or official@wwi.org.in"
+              placeholder="Enter your username or email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -107,52 +120,46 @@ export function Login() {
               variant="primary"
               size="lg"
               loading={loading}
-              className="w-full mt-2"
+              className="w-full mt-2 font-semibold"
             >
               Sign In <ArrowRight className="w-3.5 h-3.5 ml-1" />
             </Button>
           </form>
 
-          {/* Master Admin Fast Sign-In Card */}
-          <div className="mt-5 p-3.5 bg-wwi-surface border border-wwi-border rounded-lg text-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-wwi-text">WWI Company Business Admin:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('wwi-admin-9326')
-                  setPassword('wwiPVTLTD@9326')
-                }}
-                className="text-[11px] font-semibold text-wwi-dark underline hover:text-black cursor-pointer"
-              >
-                Auto-fill & Ready
-              </button>
-            </div>
-            <div className="font-mono text-[11px] text-wwi-muted space-y-0.5">
-              <div>Username: <span className="font-semibold text-wwi-text">wwi-admin-9326</span></div>
-              <div>Password: <span className="font-semibold text-wwi-text">wwiPVTLTD@9326</span></div>
-            </div>
-          </div>
-
           <div className="mt-6 pt-6 border-t border-wwi-border flex items-center justify-between text-xs text-wwi-muted">
             <div className="flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" />
-              <span>Role-governed security</span>
+              <span>Enterprise role security</span>
             </div>
             <Link
               to="/bootstrap"
               className="text-[11px] text-neutral-400 hover:text-wwi-text transition"
             >
-              First-time Super Admin setup →
+              Admin Setup →
             </Link>
           </div>
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="text-center text-xs text-wwi-muted">
-        Work Wizards Innovations Pvt Ltd &copy; {new Date().getFullYear()}. All rights reserved.
-      </div>
+      {/* Footer with WWI official redirect */}
+      <footer className="text-center text-xs text-wwi-muted space-y-1.5">
+        <div className="flex items-center justify-center gap-1">
+          <span>Built by</span>
+          <a
+            href="https://wwi.org.in"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-wwi-text hover:underline inline-flex items-center gap-1"
+            title="Work Wizards Innovations Pvt Ltd (https://wwi.org.in)"
+          >
+            Work Wizards Innovations Pvt Ltd
+            <ExternalLink className="w-3 h-3 text-neutral-400" />
+          </a>
+        </div>
+        <div className="text-[11px] text-neutral-400">
+          &copy; {new Date().getFullYear()} Work Wizards Innovations Pvt Ltd. All rights reserved.
+        </div>
+      </footer>
     </div>
   )
 }

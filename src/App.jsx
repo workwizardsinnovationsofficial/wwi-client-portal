@@ -40,33 +40,13 @@ import { ClientDeliverablesList } from './pages/client/ClientDeliverablesList'
 import { ClientMessagesView } from './pages/client/ClientMessagesView'
 import { ClientSupportList } from './pages/client/ClientSupportList'
 import { ClientProfile } from './pages/client/ClientProfile'
-
-function RootRedirect() {
-  const { user, isStaff, loading } = useAuth()
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-white p-6">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded bg-wwi-dark animate-pulse" />
-          <div className="text-xs text-wwi-muted">Loading WWI Clienter...</div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />
-  }
-
-  return <Navigate to={isStaff ? '/admin' : '/portal'} replace />
-}
+import { LandingPage } from './pages/LandingPage'
 
 export function App() {
   return (
     <Routes>
-      {/* Root redirect */}
-      <Route path="/" element={<RootRedirect />} />
+      {/* Public Landing Page */}
+      <Route path="/" element={<LandingPage />} />
 
       {/* Public Auth Routes */}
       <Route path="/login" element={<Login />} />

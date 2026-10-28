@@ -96,19 +96,25 @@ export function Sidebar({ mobile = false, onCloseMobile }) {
     >
       {/* Brand Header */}
       <div className="h-14 px-5 border-b border-wwi-border flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-6 h-6 rounded bg-wwi-dark flex items-center justify-center text-white text-xs font-bold tracking-wider">
+        <a
+          href="https://wwi.org.in"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2.5 hover:opacity-85 transition group"
+          title="Work Wizards Innovations Official Website (https://wwi.org.in)"
+        >
+          <div className="w-6 h-6 rounded bg-wwi-dark flex items-center justify-center text-white text-xs font-bold tracking-wider group-hover:scale-105 transition-transform">
             W
           </div>
           <div>
-            <div className="text-xs font-bold tracking-tight text-wwi-text uppercase">
+            <div className="text-xs font-bold tracking-tight text-wwi-text uppercase group-hover:underline">
               WWI Clienter
             </div>
-            <div className="text-[10px] text-wwi-muted leading-tight">
+            <div className="text-[10px] text-wwi-muted leading-tight group-hover:text-wwi-text">
               Work Wizards Innovations
             </div>
           </div>
-        </div>
+        </a>
         {mobile && (
           <button
             type="button"
